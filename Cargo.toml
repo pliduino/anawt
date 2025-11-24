@@ -6,7 +6,7 @@ description = "All names were taken"
 repository = "https://github.com/pliduino/anawt"
 
 [dependencies]
-lt-rs = { github = "pliduino/lt-rs", branch = "master" }
+lt-rs = { git = " https://github.com/pliduino/lt-rs.git", branch = "master" }
 rclite = "0.3.0"
 tokio = "1.47.1"
 tracing = "0.1.41"
