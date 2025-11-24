@@ -1,0 +1,12 @@
+[package]
+name = "anawt"
+version = "0.1.0"
+edition = "2024"
+description = "All names were taken"
+repository = "https://github.com/pliduino/anawt"
+
+[dependencies]
+lt-rs = { github = "pliduino/lt-rs", branch = "master" }
+rclite = "0.3.0"
+tokio = "1.47.1"
+tracing = "0.1.41"
