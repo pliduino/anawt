@@ -8,7 +8,10 @@ use std::{
 
 use lt_rs::{
     add_torrent_params::AddTorrentParams,
-    alerts::{Alert, ErrorCode, TorrentAlert, TorrentState},
+    alerts::{
+        AddTorrentAlert, Alert, SaveResumeDataAlert, SaveResumeDataFailedAlert, StateChangedAlert,
+        StateUpdateAlert, TorrentAlert, TorrentFinishedAlert, TorrentState,
+    },
     info_hash::InfoHash,
     session::LtSession,
     settings_pack::SettingsPack,
@@ -25,7 +28,7 @@ use tracing::{error, info};
 
 use crate::torrent_entry::{AnawtTorrentStatus, TorrentEntry};
 
-struct TorrentClientVava {
+struct TorrentClientInner {
     session: LtSession,
     torrents: HashMap<InfoHash, TorrentEntry>,
     pending_added_torrents: VecDeque<oneshot::Sender<()>>,
@@ -64,7 +67,7 @@ impl TorrentClient {
         let _handle = _handle_ref.clone();
 
         tokio::spawn(async move {
-            let mut client = TorrentClientVava::new(&settings, "./data/torrents".to_string());
+            let mut client = TorrentClientInner::new(&settings, "./data/torrents".to_string());
 
             client.load_torrents();
 
@@ -162,13 +165,13 @@ impl TorrentClient {
     }
 }
 
-impl TorrentClientVava {
-    pub fn new(settings: &SettingsPack, save_path: String) -> TorrentClientVava {
+impl TorrentClientInner {
+    pub fn new(settings: &SettingsPack, save_path: String) -> TorrentClientInner {
         if !Path::new(&save_path).exists() {
             fs::create_dir_all(&save_path).unwrap();
         }
 
-        TorrentClientVava {
+        TorrentClientInner {
             session: LtSession::new_with_settings(settings),
             torrents: HashMap::new(),
             pending_added_torrents: VecDeque::new(),
@@ -187,7 +190,7 @@ impl TorrentClientVava {
         info!("Added torrent: {}", info_hash.as_base64());
 
         let (status, _) = tokio::sync::watch::channel(AnawtTorrentStatus {
-            state: TorrentState::Unknown,
+            state: TorrentState::CheckingFiles,
             progress: 0.0,
         });
 
@@ -244,9 +247,9 @@ impl TorrentClientVava {
 
         for alert in alerts.iter() {
             match alert {
-                Alert::TorrentAlert { handle, alert } => self.handle_torrent_alerts(handle, alert),
-                Alert::StateUpdate { status } => self.handle_state_update(status),
-                Alert::NotImplemented => (),
+                Alert::TorrentAlert(alert) => self.handle_torrent_alerts(alert),
+                Alert::StateUpdate(alert) => self.handle_state_update(alert),
+                _ => (),
             }
         }
     }
@@ -255,16 +258,17 @@ impl TorrentClientVava {
         self.session.post_torrent_updates(flags);
     }
 
-    fn handle_state_update(&mut self, status: Vec<TorrentStatus>) {
+    fn handle_state_update(&mut self, alert: &StateUpdateAlert) {
+        let status = alert.status();
         for status in status.iter() {
-            let info_hash = status.handle.info_hash();
+            let info_hash = status.handle().info_hashes();
             if let Some(entry) = self.torrents.get_mut(&info_hash) {
                 entry.status.send_if_modified(|s| {
-                    if s.state == status.state && s.progress == status.progress {
+                    if s.state == status.state() && s.progress == status.progress() {
                         return false;
                     }
-                    s.state = status.state;
-                    s.progress = status.progress;
+                    s.state = status.state();
+                    s.progress = status.progress();
                     true
                 });
             }
@@ -275,38 +279,33 @@ impl TorrentClientVava {
     // ║                              Torrent Alerts                               ║
     // ╚===========================================================================╝
 
-    fn handle_torrent_alerts(&mut self, handle: TorrentHandle, alert: TorrentAlert) {
+    fn handle_torrent_alerts(&mut self, alert: &TorrentAlert) {
         match alert {
-            TorrentAlert::TorrentFinished => self.handle_torrent_finished(handle),
-            TorrentAlert::AddTorrent { params, error } => {
-                self.handle_torrent_added(handle, params, error)
-            }
-            TorrentAlert::StateChanged { state, .. } => self.handle_state_changed(handle, state),
-            TorrentAlert::SaveResumeData { params } => self.handle_save_resume_data(handle, params),
-            TorrentAlert::SaveResumeDataFailed { error } => {
-                self.handle_save_resume_data_failed(handle, error)
-            }
+            TorrentAlert::TorrentFinished(alert) => self.handle_torrent_finished(alert),
+            TorrentAlert::AddTorrent(alert) => self.handle_add_torrent(alert),
+            TorrentAlert::StateChanged(alert) => self.handle_state_changed(alert),
+            TorrentAlert::SaveResumeData(alert) => self.handle_save_resume_data(alert),
+            TorrentAlert::SaveResumeDataFailed(alert) => self.handle_save_resume_data_failed(alert),
             _ => (),
         };
     }
 
-    fn handle_torrent_finished(&mut self, handle: TorrentHandle) {
-        info!("Finished torrent: {}", handle.info_hash().as_base64());
+    fn handle_torrent_finished(&mut self, alert: &TorrentFinishedAlert) {
+        // info!(
+        //     "Finished torrent: {}",
+        //     alert.handle().info_hash().as_base64()
+        // );
     }
 
-    fn handle_torrent_added(
-        &mut self,
-        handle: TorrentHandle,
-        _params: AddTorrentParams,
-        error: ErrorCode,
-    ) {
-        if error != 0 {
-            error!("Error adding torrent: {}", error);
-            // TODO: Change torrent status
-            return;
+    fn handle_add_torrent(&mut self, alert: &AddTorrentAlert) {
+        let error = alert.error();
+        if !error.is_ok() {
+            error!("Error adding torrent: {:?}", error);
         }
 
-        if let Some(entry) = self.torrents.get_mut(&handle.info_hash()) {
+        let handle = alert.handle();
+
+        if let Some(entry) = self.torrents.get_mut(&handle.info_hashes()) {
             entry.handle = Some(handle);
         }
 
@@ -315,15 +314,16 @@ impl TorrentClientVava {
         }
     }
 
-    fn handle_state_changed(&mut self, handle: TorrentHandle, state: TorrentState) {
+    fn handle_state_changed(&mut self, alert: &StateChangedAlert) {
         // if let Some(entry) = self.torrents.get_mut(&handle.info_hash()) {
         //     entry.status.state = state;
         // }
     }
 
-    fn handle_save_resume_data(&mut self, _: TorrentHandle, params: AddTorrentParams) {
+    fn handle_save_resume_data(&mut self, alert: &SaveResumeDataAlert) {
         self.pending_saves -= 1;
         // TODO: Get and save params
+        let params = alert.params();
 
         let buf = params.write_resume_data_buf();
 
@@ -340,9 +340,9 @@ impl TorrentClientVava {
         }
     }
 
-    fn handle_save_resume_data_failed(&mut self, handle: TorrentHandle, error: i32) {
+    fn handle_save_resume_data_failed(&mut self, alert: &SaveResumeDataFailedAlert) {
         self.pending_saves -= 1;
-        error!("Error saving resume data: {}", error);
+        error!("Error saving resume data: {:?}", alert.error());
     }
 
     // ===========================  End Torrent Alerts  ============================

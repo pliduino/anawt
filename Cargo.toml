@@ -6,7 +6,23 @@ description = "All names were taken"
 repository = "https://github.com/pliduino/anawt"
 
 [dependencies]
-lt-rs = { git = " https://github.com/pliduino/lt-rs.git", branch = "master" }
+lt-rs = { git = "https://github.com/pliduino/lt-rs.git", branch = "develop" }
+lt-rs = { path = "../lt-rs" }
+
 rclite = "0.3.0"
-tokio = "1.47.1"
+tokio = { version = "1.47.1", features = [
+    "sync",
+    "rt-multi-thread",
+    "macros",
+    "net",
+] }
 tracing = "0.1.41"
+
+[features]
+default = []
+lto = ["lt-rs/lto"]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
