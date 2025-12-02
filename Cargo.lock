@@ -215,6 +215,8 @@ dependencies = [
 [[package]]
 name = "lt-rs"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6494ec49b244d77d804185ba96f7f804ed3583f00695de7fe8173a5e2c6c43a7"
 dependencies = [
  "base64",
  "bitflags",
