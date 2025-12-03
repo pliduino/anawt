@@ -2,8 +2,12 @@
 name = "anawt"
 version = "0.1.0"
 edition = "2024"
-description = "All names were taken"
+authors = ["Pedro Liduino <liduinopedro@gmail.com>"]
+description = "Easy to use torrent client to embed in your applications"
 repository = "https://github.com/pliduino/anawt"
+license = "MIT"
+keywords = ["libtorrent", "bittorrent", "torrent"]
+readme = "README.md"
 
 [dependencies]
 lt-rs = "0.1.0"
@@ -19,8 +23,3 @@ tracing = "0.1.41"
 [features]
 default = []
 lto = ["lt-rs/lto"]
-
-[profile.release]
-opt-level = 3
-lto = "fat"
-codegen-units = 1

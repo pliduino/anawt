@@ -144,12 +144,15 @@ impl TorrentClient {
         Ok(info_hash)
     }
 
+    /// Saves the torrents to the given path
     pub async fn save(&self, path: PathBuf) -> Result<(), ()> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(ClientMessage::Save(path, tx)).await.unwrap();
         rx.await.unwrap()
     }
 
+    /// Gets the status of a torrent
+    /// Consider using [`subscribe_torrent`](Self::subscribe_torrent) to get updates
     pub async fn get_status(&self, info_hash: InfoHash) -> Option<AnawtTorrentStatus> {
         let (tx, rx) = oneshot::channel();
         self.tx
