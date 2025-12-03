@@ -10,7 +10,7 @@ keywords = ["libtorrent", "bittorrent", "torrent"]
 readme = "README.md"
 
 [dependencies]
-lt-rs = "0.1.0"
+lt-rs = "0.1.2"
 rclite = "0.3.0"
 tokio = { version = "1.47.1", features = [
     "sync",
