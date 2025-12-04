@@ -35,7 +35,7 @@ struct SaveRequest {
     pub tx: oneshot::Sender<Result<(), ()>>,
 }
 
-struct TorrentClientInner {
+pub(crate) struct TorrentClientInner {
     session: LtSession,
     torrents: HashMap<InfoHash, TorrentEntry>,
     pending_added_torrents: VecDeque<oneshot::Sender<()>>,
@@ -153,6 +153,8 @@ impl TorrentClient {
 
     /// Gets the status of a torrent
     /// Consider using [`subscribe_torrent`](Self::subscribe_torrent) to get updates
+    ///
+    /// Returns [`None`] if the torrent is not found
     pub async fn get_status(&self, info_hash: InfoHash) -> Option<AnawtTorrentStatus> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -166,6 +168,34 @@ impl TorrentClient {
         }
     }
 
+    /// Subscribes to the status of a torrent
+    /// The returned [`watch::Receiver`] will be updated with the status of the torrent
+    /// as soon as it changes
+    ///
+    /// Returns [`None`] if the torrent is not found
+    ///
+    /// ## Example
+    /// ```no_run
+    /// # use anawt::{TorrentClient, AnawtTorrentStatus, options::AnawtOptions};
+    /// # use std::time::Duration;
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+    /// let client = TorrentClient::create(AnawtOptions::default());
+    ///
+    /// let info_hash = client.add_magnet("my-magnet-link", "/path/to/torrent").await.unwrap();
+    /// let mut rx = client.subscribe_torrent(info_hash).await.unwrap();
+    ///
+    /// tokio::spawn(async move {
+    ///     loop {
+    ///         {
+    ///             let status = rx.borrow();
+    ///             println!("Torrent progress: {:?}", status.progress);
+    ///         }
+    ///         if rx.changed().await.is_err() {
+    ///             break;
+    ///         }
+    ///     }
+    /// });
+    /// # });
     pub async fn subscribe_torrent(
         &self,
         info_hash: InfoHash,
