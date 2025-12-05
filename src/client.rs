@@ -15,8 +15,7 @@ use lt_rs::{
     info_hash::InfoHash,
     session::LtSession,
     settings_pack::SettingsPack,
-    torrent_handle::{ResumeDataFlags, StatusFlags, TorrentHandle},
-    torrent_status::TorrentStatus,
+    torrent_handle::{ResumeDataFlags, StatusFlags},
 };
 use rclite::Arc;
 use tokio::sync::{
@@ -24,18 +23,28 @@ use tokio::sync::{
     oneshot::{self},
     watch,
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
-use crate::torrent_entry::{AnawtTorrentStatus, TorrentEntry};
+use crate::{
+    options::AnawtOptions,
+    torrent_entry::{AnawtTorrentStatus, TorrentEntry},
+};
 
-struct TorrentClientInner {
+struct SaveRequest {
+    pub path: PathBuf,
+    pub tx: oneshot::Sender<Result<(), ()>>,
+}
+
+pub(crate) struct TorrentClientInner {
     session: LtSession,
     torrents: HashMap<InfoHash, TorrentEntry>,
     pending_added_torrents: VecDeque<oneshot::Sender<()>>,
 
-    saving_sender: Option<oneshot::Sender<Result<(), ()>>>,
-    pending_saves: u32,
-    save_path: String,
+    currently_saving: Option<SaveRequest>,
+    save_requests: VecDeque<SaveRequest>,
+
+    /// How many torrents are still not saved from current request
+    pending_save_count: u32,
 }
 
 #[derive(Debug)]
@@ -46,7 +55,8 @@ enum ClientMessage {
         InfoHash,
         oneshot::Sender<Option<watch::Receiver<AnawtTorrentStatus>>>,
     ),
-    Save(oneshot::Sender<Result<(), ()>>),
+    Save(PathBuf, oneshot::Sender<Result<(), ()>>),
+    Load(PathBuf, oneshot::Sender<Result<(), ()>>),
 }
 
 /// Torrent client that communicates with the main libtorrent thread
@@ -60,16 +70,19 @@ pub struct TorrentClient {
 }
 
 impl TorrentClient {
-    pub fn create(settings: SettingsPack) -> TorrentClient {
+    pub fn create(options: AnawtOptions) -> TorrentClient {
         let (tx, mut rx) = mpsc::channel(100);
 
         let _handle_ref = Arc::new(());
         let _handle = _handle_ref.clone();
 
         tokio::spawn(async move {
-            let mut client = TorrentClientInner::new(&settings, "./data/torrents".to_string());
-
-            client.load_torrents();
+            let mut client = {
+                match options.settings_pack {
+                    Some(settings) => TorrentClientInner::new(&settings),
+                    None => TorrentClientInner::new(&SettingsPack::new()),
+                }
+            };
 
             let mut last_update = Instant::now();
 
@@ -98,13 +111,12 @@ impl TorrentClient {
                         ClientMessage::SubscribeTorrent(info_hash, tx) => {
                             tx.send(client.subscribe_torrent(info_hash)).unwrap();
                         }
-                        ClientMessage::Save(tx) => {
-                            if client.pending_saves > 0 {
-                                tx.send(Err(())).unwrap();
-                                continue;
-                            }
-                            client.saving_sender = Some(tx);
-                            client.save_resume_data();
+                        ClientMessage::Save(path, tx) => {
+                            client.save_requests.push_back(SaveRequest { path, tx });
+                            client.try_pop_save_request();
+                        }
+                        ClientMessage::Load(path, tx) => {
+                            client.load_torrents(path);
                         }
                     }
                 }
@@ -132,12 +144,17 @@ impl TorrentClient {
         Ok(info_hash)
     }
 
-    pub async fn save(&self) -> Result<(), ()> {
+    /// Saves the torrents to the given path
+    pub async fn save(&self, path: PathBuf) -> Result<(), ()> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(ClientMessage::Save(tx)).await.unwrap();
+        self.tx.send(ClientMessage::Save(path, tx)).await.unwrap();
         rx.await.unwrap()
     }
 
+    /// Gets the status of a torrent
+    /// Consider using [`subscribe_torrent`](Self::subscribe_torrent) to get updates
+    ///
+    /// Returns [`None`] if the torrent is not found
     pub async fn get_status(&self, info_hash: InfoHash) -> Option<AnawtTorrentStatus> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -151,6 +168,34 @@ impl TorrentClient {
         }
     }
 
+    /// Subscribes to the status of a torrent
+    /// The returned [`watch::Receiver`] will be updated with the status of the torrent
+    /// as soon as it changes
+    ///
+    /// Returns [`None`] if the torrent is not found
+    ///
+    /// ## Example
+    /// ```no_run
+    /// # use anawt::{TorrentClient, AnawtTorrentStatus, options::AnawtOptions};
+    /// # use std::time::Duration;
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+    /// let client = TorrentClient::create(AnawtOptions::default());
+    ///
+    /// let info_hash = client.add_magnet("my-magnet-link", "/path/to/torrent").await.unwrap();
+    /// let mut rx = client.subscribe_torrent(info_hash).await.unwrap();
+    ///
+    /// tokio::spawn(async move {
+    ///     loop {
+    ///         {
+    ///             let status = rx.borrow();
+    ///             println!("Torrent progress: {:?}", status.progress);
+    ///         }
+    ///         if rx.changed().await.is_err() {
+    ///             break;
+    ///         }
+    ///     }
+    /// });
+    /// # });
     pub async fn subscribe_torrent(
         &self,
         info_hash: InfoHash,
@@ -166,19 +211,15 @@ impl TorrentClient {
 }
 
 impl TorrentClientInner {
-    pub fn new(settings: &SettingsPack, save_path: String) -> TorrentClientInner {
-        if !Path::new(&save_path).exists() {
-            fs::create_dir_all(&save_path).unwrap();
-        }
-
+    pub fn new(settings: &SettingsPack) -> TorrentClientInner {
         TorrentClientInner {
             session: LtSession::new_with_settings(settings),
             torrents: HashMap::new(),
             pending_added_torrents: VecDeque::new(),
 
-            saving_sender: None,
-            pending_saves: 0,
-            save_path,
+            pending_save_count: 0,
+            currently_saving: None,
+            save_requests: VecDeque::new(),
         }
     }
 
@@ -203,18 +244,26 @@ impl TorrentClientInner {
         );
     }
 
-    pub fn save_resume_data(&mut self) {
-        self.pending_saves = self.torrents.len() as u32;
-        for entry in self.torrents.values() {
-            if let Some(handle) = &entry.handle {
-                handle.save_resume_data(ResumeDataFlags::SaveInfoDict);
+    // Makes a request to save all torrents, they'll be returned as alerts to then save
+    pub fn try_pop_save_request(&mut self) {
+        match self.save_requests.pop_front() {
+            Some(request) => {
+                self.currently_saving = Some(request);
+                self.pending_save_count = self.torrents.len() as u32;
+                for entry in self.torrents.values() {
+                    if let Some(handle) = &entry.handle {
+                        handle.save_resume_data(ResumeDataFlags::SaveInfoDict);
+                    }
+                }
+            }
+            None => {
+                return;
             }
         }
     }
 
-    pub fn load_torrents(&mut self) {
-        let save_path = PathBuf::from(&self.save_path);
-        let dir = fs::read_dir(save_path).unwrap();
+    pub fn load_torrents(&mut self, path: PathBuf) {
+        let dir = fs::read_dir(path).unwrap();
 
         for entry in dir {
             let entry = entry.unwrap();
@@ -321,28 +370,53 @@ impl TorrentClientInner {
     }
 
     fn handle_save_resume_data(&mut self, alert: &SaveResumeDataAlert) {
-        self.pending_saves -= 1;
-        // TODO: Get and save params
-        let params = alert.params();
+        if self.pending_save_count == 0 {
+            warn!(
+                "Attempted to save but no torrent is pending, report this error to Anawt developers"
+            );
+            // We continue and save the file if possible anyway
+            // probably will give another warning down below due to no pending request
+        } else {
+            self.pending_save_count -= 1;
+        }
 
+        let params = alert.params();
         let buf = params.write_resume_data_buf();
 
-        info!("Saving: ");
+        if self.currently_saving.is_none() {
+            // Shouldn't ever happen
+            warn!(
+                "Attempted to save but no request is pending, report this error to Anawt developers"
+            );
+            return;
+        }
 
         fs::write(
-            self.save_path.clone() + "/" + &params.get_info_hash().as_base64(),
+            self.currently_saving
+                .as_ref()
+                .unwrap() // Safe to unwrap because we already checked that it's Some
+                .path
+                .join(&params.get_info_hash().as_base64()),
             buf,
         )
         .unwrap();
 
-        if self.pending_saves == 0 {
-            self.saving_sender.take().unwrap().send(Ok(())).unwrap();
+        if self.pending_save_count == 0 {
+            self.currently_saving
+                .take()
+                .unwrap() // Safe to unwrap because we already checked that it's Some
+                .tx
+                .send(Ok(()))
+                .unwrap();
+
+            self.try_pop_save_request();
         }
     }
 
     fn handle_save_resume_data_failed(&mut self, alert: &SaveResumeDataFailedAlert) {
-        self.pending_saves -= 1;
+        self.pending_save_count -= 1;
         error!("Error saving resume data: {:?}", alert.error());
+        // TODO: Return an error to the client
     }
 
     // ===========================  End Torrent Alerts  ============================
