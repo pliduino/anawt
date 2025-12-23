@@ -10,7 +10,9 @@ keywords = ["libtorrent", "bittorrent", "torrent"]
 readme = "README.md"
 
 [dependencies]
-lt-rs = "0.1.2"
+error_set = "0.9.1"
+# lt-rs = "0.1.2"
+lt-rs = { git = "https://github.com/pliduino/lt-rs", branch = "develop" }
 rclite = "0.3.0"
 tokio = { version = "1.47.1", features = [
     "sync",

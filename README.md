@@ -1,7 +1,5 @@
 # anawt ![License: MIT](https://img.shields.io/badge/license-MIT-blue) [![anawt on crates.io](https://img.shields.io/crates/v/anawt)](https://crates.io/crates/anawt) [![anawt on docs.rs](https://docs.rs/anawt/badge.svg)](https://docs.rs/anawt) [![Source Code Repository](https://img.shields.io/badge/Code-On%20GitHub-blue?logo=GitHub)](https://github.com/pliduino/anawt)
 
-## Anawt
-
 Easy to use torrent client built on top of [libtorrent][__link0] and [tokio][__link1].
 
 ### Examples

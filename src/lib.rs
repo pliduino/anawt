@@ -1,5 +1,3 @@
-//! # Anawt
-//!
 //! Easy to use torrent client built on top of [libtorrent](https://github.com/arvidn/libtorrent) and [tokio](https://tokio.rs/).
 //!
 //! ## Examples
@@ -28,6 +26,7 @@
 //! ```
 pub use lt_rs::alerts::AlertCategory;
 pub use lt_rs::settings_pack::SettingsPack;
+pub mod errors;
 
 mod client;
 pub mod options;

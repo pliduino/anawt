@@ -26,6 +26,7 @@ use tokio::sync::{
 use tracing::{error, info, warn};
 
 use crate::{
+    errors::SaveError,
     options::AnawtOptions,
     torrent_entry::{AnawtTorrentStatus, TorrentEntry},
 };
@@ -117,6 +118,7 @@ impl TorrentClient {
                         }
                         ClientMessage::Load(path, tx) => {
                             client.load_torrents(path);
+                            tx.send(Ok(()));
                         }
                     }
                 }
@@ -145,10 +147,17 @@ impl TorrentClient {
     }
 
     /// Saves the torrents to the given path
-    pub async fn save(&self, path: PathBuf) -> Result<(), ()> {
+    pub async fn save(&self, path: PathBuf) -> Result<(), SaveError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(ClientMessage::Save(path, tx)).await.unwrap();
-        rx.await.unwrap()
+        self.tx.send(ClientMessage::Save(path, tx)).await?;
+        rx.await?
+    }
+
+    /// Loads the torrents from the given folder
+    pub async fn load(&self, path: PathBuf) -> Result<(), LoadError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(ClientMessage::Load(path, tx)).await?;
+        rx.await?
     }
 
     /// Gets the status of a torrent
