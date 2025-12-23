@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "anawt"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error_set",
  "lt-rs",
@@ -246,7 +246,7 @@ dependencies = [
 [[package]]
 name = "lt-rs"
 version = "0.1.3"
-source = "git+https://github.com/pliduino/lt-rs?branch=develop#11b45d92a01cc4df42c1fa0f5eea693a8aacd92a"
+source = "git+https://github.com/pliduino/lt-rs?branch=develop#4bb008bd6424e6dc196ca4664dab11dbf7686041"
 dependencies = [
  "base64",
  "bitflags",

@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fs::{self, File},
     io::Read,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -26,14 +26,14 @@ use tokio::sync::{
 use tracing::{error, info, warn};
 
 use crate::{
-    errors::SaveError,
+    errors::{LoadTorrentError, SaveError},
     options::AnawtOptions,
     torrent_entry::{AnawtTorrentStatus, TorrentEntry},
 };
 
 struct SaveRequest {
     pub path: PathBuf,
-    pub tx: oneshot::Sender<Result<(), ()>>,
+    pub tx: oneshot::Sender<Result<(), SaveError>>,
 }
 
 pub(crate) struct TorrentClientInner {
@@ -49,15 +49,15 @@ pub(crate) struct TorrentClientInner {
 }
 
 #[derive(Debug)]
-enum ClientMessage {
+pub enum ClientMessage {
     AddTorrent(AddTorrentParams),
     GetState(InfoHash, oneshot::Sender<Option<AnawtTorrentStatus>>),
     SubscribeTorrent(
         InfoHash,
         oneshot::Sender<Option<watch::Receiver<AnawtTorrentStatus>>>,
     ),
-    Save(PathBuf, oneshot::Sender<Result<(), ()>>),
-    Load(PathBuf, oneshot::Sender<Result<(), ()>>),
+    Save(PathBuf, oneshot::Sender<Result<(), SaveError>>),
+    Load(PathBuf, oneshot::Sender<Result<(), LoadTorrentError>>),
 }
 
 /// Torrent client that communicates with the main libtorrent thread
@@ -118,7 +118,7 @@ impl TorrentClient {
                         }
                         ClientMessage::Load(path, tx) => {
                             client.load_torrents(path);
-                            tx.send(Ok(()));
+                            let _ = tx.send(Ok(())); // TODO: Handle this
                         }
                     }
                 }
@@ -154,7 +154,7 @@ impl TorrentClient {
     }
 
     /// Loads the torrents from the given folder
-    pub async fn load(&self, path: PathBuf) -> Result<(), LoadError> {
+    pub async fn load(&self, path: PathBuf) -> Result<(), LoadTorrentError> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(ClientMessage::Load(path, tx)).await?;
         rx.await?
@@ -348,7 +348,7 @@ impl TorrentClientInner {
         };
     }
 
-    fn handle_torrent_finished(&mut self, alert: &TorrentFinishedAlert) {
+    fn handle_torrent_finished(&mut self, _alert: &TorrentFinishedAlert) {
         // info!(
         //     "Finished torrent: {}",
         //     alert.handle().info_hash().as_base64()
@@ -372,7 +372,7 @@ impl TorrentClientInner {
         }
     }
 
-    fn handle_state_changed(&mut self, alert: &StateChangedAlert) {
+    fn handle_state_changed(&mut self, _alert: &StateChangedAlert) {
         // if let Some(entry) = self.torrents.get_mut(&handle.info_hash()) {
         //     entry.status.state = state;
         // }
