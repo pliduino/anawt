@@ -1,3 +1,5 @@
+use std::io;
+
 use crate::client::ClientMessage;
 
 error_set::error_set! {
@@ -10,6 +12,11 @@ error_set::error_set! {
         RecvError(tokio::sync::oneshot::error::RecvError)
     }
 
+    IoError := {
+        IoError(io::Error)
+    }
+
     SaveError := LtrsError || TokioSyncError
-    LoadTorrentError := LtrsError || TokioSyncError
+
+    LoadTorrentError := LtrsError || TokioSyncError || IoError
 }

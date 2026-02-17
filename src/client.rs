@@ -117,8 +117,7 @@ impl TorrentClient {
                             client.try_pop_save_request();
                         }
                         ClientMessage::Load(path, tx) => {
-                            client.load_torrents(path);
-                            let _ = tx.send(Ok(())); // TODO: Handle this
+                            let _ = tx.send(client.load_torrents(path));
                         }
                     }
                 }
@@ -271,19 +270,21 @@ impl TorrentClientInner {
         }
     }
 
-    pub fn load_torrents(&mut self, path: PathBuf) {
-        let dir = fs::read_dir(path).unwrap();
+    pub fn load_torrents(&mut self, path: PathBuf) -> Result<(), LoadTorrentError> {
+        let dir = fs::read_dir(path)?;
 
         for entry in dir {
-            let entry = entry.unwrap();
-            let mut file = File::open(entry.path()).unwrap();
+            let entry = entry?;
+            let mut file = File::open(entry.path())?;
             let mut buffer = vec![];
-            file.read_to_end(&mut buffer).unwrap();
+            file.read_to_end(&mut buffer)?;
 
             let params = AddTorrentParams::load_resume_data(&buffer);
             info!("Loading: {}", entry.path().display(),);
             self.add_torrent(&params);
         }
+
+        Ok(())
     }
 
     pub fn subscribe_torrent(
