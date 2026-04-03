@@ -66,13 +66,13 @@ pub enum ClientMessage {
 /// Cheap clone
 #[derive(Debug, Clone)]
 pub struct TorrentClient {
-    tx: mpsc::Sender<ClientMessage>,
+    tx: mpsc::UnboundedSender<ClientMessage>,
     _handle_ref: Arc<()>, // Keeps loop alive until client is fully dropped
 }
 
 impl TorrentClient {
     pub fn create(options: AnawtOptions) -> TorrentClient {
-        let (tx, mut rx) = mpsc::channel(100);
+        let (tx, mut rx) = mpsc::unbounded_channel();
 
         let _handle_ref = Arc::new(());
         let _handle = _handle_ref.clone();
@@ -137,10 +137,7 @@ impl TorrentClient {
         params.set_path(path);
         let info_hash = params.get_info_hash();
 
-        self.tx
-            .send(ClientMessage::AddTorrent(params))
-            .await
-            .unwrap();
+        self.tx.send(ClientMessage::AddTorrent(params)).unwrap();
 
         Ok(info_hash)
     }
@@ -148,14 +145,14 @@ impl TorrentClient {
     /// Saves the torrents to the given path
     pub async fn save(&self, path: PathBuf) -> Result<(), SaveError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(ClientMessage::Save(path, tx)).await?;
+        self.tx.send(ClientMessage::Save(path, tx))?;
         rx.await?
     }
 
     /// Loads the torrents from the given folder
     pub async fn load(&self, path: PathBuf) -> Result<(), LoadTorrentError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(ClientMessage::Load(path, tx)).await?;
+        self.tx.send(ClientMessage::Load(path, tx))?;
         rx.await?
     }
 
@@ -167,7 +164,6 @@ impl TorrentClient {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(ClientMessage::GetState(info_hash, tx))
-            .await
             .unwrap();
 
         match rx.await {
@@ -211,7 +207,6 @@ impl TorrentClient {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(ClientMessage::SubscribeTorrent(info_hash, tx))
-            .await
             .unwrap();
 
         rx.await.unwrap()
