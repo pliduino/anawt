@@ -104,13 +104,13 @@ impl TorrentClient {
                         ClientMessage::AddTorrent(ref params) => client.add_torrent(params),
                         ClientMessage::GetState(info_hash, tx) => {
                             if let Some(entry) = client.torrents.get(&info_hash) {
-                                tx.send(Some(entry.status.borrow().clone())).unwrap();
+                                let _ = tx.send(Some(entry.status.borrow().clone()));
                             } else {
-                                tx.send(None).unwrap();
+                                let _ = tx.send(None);
                             }
                         }
                         ClientMessage::SubscribeTorrent(info_hash, tx) => {
-                            tx.send(client.subscribe_torrent(info_hash)).unwrap();
+                            let _ = tx.send(client.subscribe_torrent(info_hash));
                         }
                         ClientMessage::Save(path, tx) => {
                             client.save_requests.push_back(SaveRequest { path, tx });
@@ -364,7 +364,7 @@ impl TorrentClientInner {
         }
 
         if let Some(tx) = self.pending_added_torrents.pop_front() {
-            tx.send(()).unwrap();
+            let _ = tx.send(());
         }
     }
 
@@ -407,12 +407,12 @@ impl TorrentClientInner {
         .unwrap();
 
         if self.pending_save_count == 0 {
-            self.currently_saving
+            let _ = self
+                .currently_saving
                 .take()
                 .unwrap() // Safe to unwrap because we already checked that it's Some
                 .tx
-                .send(Ok(()))
-                .unwrap();
+                .send(Ok(()));
 
             self.try_pop_save_request();
         }
