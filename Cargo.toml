@@ -11,9 +11,10 @@ readme = "README.md"
 
 [dependencies]
 error_set = "0.9.1"
-lt-rs = "0.1.4"
-#lt-rs = { git = "https://github.com/pliduino/lt-rs", branch = "develop" }
+# lt-rs = "0.1.4"
+lt-rs = { git = "https://github.com/pliduino/lt-rs", branch = "master" }
 rclite = "0.3.0"
+sorted-vec = "0.8.10"
 tokio = { version = "1.47.1", features = [
     "sync",
     "rt-multi-thread",

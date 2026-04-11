@@ -16,7 +16,11 @@ error_set::error_set! {
         IoError(io::Error)
     }
 
-    SaveError := LtrsError || TokioSyncError
-
     LoadTorrentError := LtrsError || TokioSyncError || IoError
+
+    TorrentError :=  LtrsError || TokioSyncError || {
+        TorrentNotFound,
+        TorrentHandleNotFound
+    }
+
 }

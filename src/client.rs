@@ -1,9 +1,9 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fs::{self, File},
     io::Read,
     path::PathBuf,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use lt_rs::{
@@ -13,11 +13,12 @@ use lt_rs::{
         StateUpdateAlert, TorrentAlert, TorrentFinishedAlert, TorrentState,
     },
     info_hash::InfoHash,
-    session::LtSession,
+    session::{LtSession, RemoveFlags},
     settings_pack::SettingsPack,
     torrent_handle::{ResumeDataFlags, StatusFlags},
 };
 use rclite::Arc;
+use sorted_vec::SortedSet;
 use tokio::sync::{
     mpsc,
     oneshot::{self},
@@ -26,19 +27,19 @@ use tokio::sync::{
 use tracing::{error, info, warn};
 
 use crate::{
-    errors::{LoadTorrentError, SaveError},
+    errors::{LoadTorrentError, LtrsError, TorrentError},
     options::AnawtOptions,
     torrent_entry::{AnawtTorrentStatus, TorrentEntry},
 };
 
 struct SaveRequest {
     pub path: PathBuf,
-    pub tx: oneshot::Sender<Result<(), SaveError>>,
+    pub tx: oneshot::Sender<Result<(), TorrentError>>,
 }
 
 pub(crate) struct TorrentClientInner {
     session: LtSession,
-    torrents: HashMap<InfoHash, TorrentEntry>,
+    torrents: SortedSet<TorrentEntry>,
     pending_added_torrents: VecDeque<oneshot::Sender<()>>,
 
     currently_saving: Option<SaveRequest>,
@@ -51,12 +52,17 @@ pub(crate) struct TorrentClientInner {
 #[derive(Debug)]
 pub enum ClientMessage {
     AddTorrent(AddTorrentParams),
+    RemoveTorrent(
+        InfoHash,
+        RemoveFlags,
+        oneshot::Sender<Result<(), TorrentError>>,
+    ),
     GetState(InfoHash, oneshot::Sender<Option<AnawtTorrentStatus>>),
     SubscribeTorrent(
         InfoHash,
         oneshot::Sender<Option<watch::Receiver<AnawtTorrentStatus>>>,
     ),
-    Save(PathBuf, oneshot::Sender<Result<(), SaveError>>),
+    Save(PathBuf, oneshot::Sender<Result<(), TorrentError>>),
     Load(PathBuf, oneshot::Sender<Result<(), LoadTorrentError>>),
 }
 
@@ -103,11 +109,14 @@ impl TorrentClient {
                     match msg {
                         ClientMessage::AddTorrent(ref params) => client.add_torrent(params),
                         ClientMessage::GetState(info_hash, tx) => {
-                            if let Some(entry) = client.torrents.get(&info_hash) {
-                                let _ = tx.send(Some(entry.status.borrow().clone()));
-                            } else {
-                                let _ = tx.send(None);
-                            }
+                            match client.get_torrent(&info_hash) {
+                                Some(t) => {
+                                    let _ = tx.send(Some(t.status.borrow().clone()));
+                                }
+                                None => {
+                                    let _ = tx.send(None);
+                                }
+                            };
                         }
                         ClientMessage::SubscribeTorrent(info_hash, tx) => {
                             let _ = tx.send(client.subscribe_torrent(info_hash));
@@ -118,6 +127,9 @@ impl TorrentClient {
                         }
                         ClientMessage::Load(path, tx) => {
                             let _ = tx.send(client.load_torrents(path));
+                        }
+                        ClientMessage::RemoveTorrent(info_hash, flags, tx) => {
+                            let _ = tx.send(client.remove_torrent(info_hash, flags));
                         }
                     }
                 }
@@ -132,8 +144,8 @@ impl TorrentClient {
         TorrentClient { _handle_ref, tx }
     }
 
-    pub async fn add_magnet(&self, magnet: &str, path: &str) -> Result<InfoHash, ()> {
-        let mut params = AddTorrentParams::parse_magnet_uri(magnet);
+    pub async fn add_magnet(&self, magnet: &str, path: &str) -> Result<InfoHash, LtrsError> {
+        let mut params = AddTorrentParams::parse_magnet_uri(magnet)?;
         params.set_path(path);
         let info_hash = params.get_info_hash();
 
@@ -142,8 +154,19 @@ impl TorrentClient {
         Ok(info_hash)
     }
 
+    pub async fn remove_torrent(
+        &self,
+        info_hash: InfoHash,
+        flags: RemoveFlags,
+    ) -> Result<(), TorrentError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ClientMessage::RemoveTorrent(info_hash, flags, tx))?;
+        rx.await?
+    }
+
     /// Saves the torrents to the given path
-    pub async fn save(&self, path: PathBuf) -> Result<(), SaveError> {
+    pub async fn save(&self, path: PathBuf) -> Result<(), TorrentError> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(ClientMessage::Save(path, tx))?;
         rx.await?
@@ -217,7 +240,7 @@ impl TorrentClientInner {
     pub fn new(settings: &SettingsPack) -> TorrentClientInner {
         TorrentClientInner {
             session: LtSession::new_with_settings(settings),
-            torrents: HashMap::new(),
+            torrents: SortedSet::new(),
             pending_added_torrents: VecDeque::new(),
 
             pending_save_count: 0,
@@ -226,25 +249,70 @@ impl TorrentClientInner {
         }
     }
 
-    pub fn add_torrent(&mut self, params: &AddTorrentParams) {
-        self.session.async_add_torrent(&params);
+    fn get_torrent(&self, info_hash: &InfoHash) -> Option<&TorrentEntry> {
+        let result = self
+            .torrents
+            .binary_search_by_key(info_hash, |t| t.info_hash);
+        match result {
+            Ok(i) => unsafe { Some(self.torrents.get_unchecked(i)) },
+            Err(_) => None,
+        }
+    }
 
+    fn get_torrent_mut(&mut self, info_hash: &InfoHash) -> Option<&mut TorrentEntry> {
+        let result = self
+            .torrents
+            .binary_search_by_key(info_hash, |t| t.info_hash);
+        match result {
+            Ok(i) => unsafe { Some(self.torrents.get_unchecked_mut_vec().get_unchecked_mut(i)) },
+            Err(_) => None,
+        }
+    }
+
+    pub fn add_torrent(&mut self, params: &AddTorrentParams) {
         let info_hash = params.get_info_hash();
+
+        // Refuses to add duplicate torrents
+        if let Some(_) = self.get_torrent(&info_hash) {
+            info!("Torrent already exists: {}", info_hash.as_base64());
+            return;
+        }
+
+        self.session.async_add_torrent(&params);
 
         info!("Added torrent: {}", info_hash.as_base64());
 
-        let (status, _) = tokio::sync::watch::channel(AnawtTorrentStatus {
+        let status = tokio::sync::watch::Sender::new(AnawtTorrentStatus {
+            name: String::new(),
             state: TorrentState::CheckingFiles,
             progress: 0.0,
         });
 
-        self.torrents.insert(
+        self.torrents.replace(TorrentEntry {
             info_hash,
-            TorrentEntry {
-                handle: None,
-                status,
-            },
-        );
+            handle: None,
+            status,
+        });
+    }
+
+    pub fn remove_torrent(
+        &mut self,
+        info_hash: InfoHash,
+        remove_flags: RemoveFlags,
+    ) -> Result<(), TorrentError> {
+        let Some(entry) = self.get_torrent(&info_hash) else {
+            return Err(TorrentError::TorrentNotFound);
+        };
+
+        let Some(handle) = entry.handle.clone() else {
+            return Err(TorrentError::TorrentHandleNotFound);
+        };
+
+        self.session.remove_torrent(&handle, remove_flags);
+
+        // TODO: Wait for alert signaling the torrent removal and then return
+
+        return Ok(());
     }
 
     // Makes a request to save all torrents, they'll be returned as alerts to then save
@@ -253,7 +321,7 @@ impl TorrentClientInner {
             Some(request) => {
                 self.currently_saving = Some(request);
                 self.pending_save_count = self.torrents.len() as u32;
-                for entry in self.torrents.values() {
+                for entry in &self.torrents {
                     if let Some(handle) = &entry.handle {
                         handle.save_resume_data(ResumeDataFlags::SaveInfoDict);
                     }
@@ -282,15 +350,16 @@ impl TorrentClientInner {
         Ok(())
     }
 
-    pub fn subscribe_torrent(
-        &mut self,
-        hash: InfoHash,
-    ) -> Option<watch::Receiver<AnawtTorrentStatus>> {
-        if let Some(entry) = self.torrents.get_mut(&hash) {
+    pub fn subscribe_torrent(&self, hash: InfoHash) -> Option<watch::Receiver<AnawtTorrentStatus>> {
+        if let Some(entry) = self.get_torrent(&hash) {
             Some(entry.status.subscribe())
         } else {
             None
         }
+    }
+
+    pub fn subscribe_all(&self) -> Vec<watch::Receiver<AnawtTorrentStatus>> {
+        self.torrents.iter().map(|t| t.status.subscribe()).collect()
     }
 
     fn process_alerts(&mut self) {
@@ -316,7 +385,7 @@ impl TorrentClientInner {
         let status = alert.status();
         for status in status.iter() {
             let info_hash = status.handle().info_hashes();
-            if let Some(entry) = self.torrents.get_mut(&info_hash) {
+            if let Some(entry) = self.get_torrent_mut(&info_hash) {
                 entry.status.send_if_modified(|s| {
                     if s.state == status.state() && s.progress == status.progress() {
                         return false;
@@ -359,7 +428,7 @@ impl TorrentClientInner {
 
         let handle = alert.handle();
 
-        if let Some(entry) = self.torrents.get_mut(&handle.info_hashes()) {
+        if let Some(entry) = self.get_torrent_mut(&handle.info_hashes()) {
             entry.handle = Some(handle);
         }
 
