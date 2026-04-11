@@ -247,7 +247,7 @@ dependencies = [
 [[package]]
 name = "lt-rs"
 version = "0.1.4"
-source = "git+https://github.com/pliduino/lt-rs?branch=master#c86b59f668c268a3dbadb6749bd81751e6d4e36c"
+source = "git+https://github.com/pliduino/lt-rs?branch=master#0a8f2caeecf402baa87e08856a8049e7cc7acb17"
 dependencies = [
  "base64",
  "bitflags",
@@ -618,7 +618,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

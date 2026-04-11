@@ -3,6 +3,7 @@ use lt_rs::{alerts::TorrentState, info_hash::InfoHash, torrent_handle::TorrentHa
 #[derive(Debug, Clone)]
 pub struct AnawtTorrentStatus {
     pub name: String,
+    pub save_path: String,
     pub state: TorrentState,
     pub progress: f64,
 }

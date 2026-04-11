@@ -295,6 +295,7 @@ impl TorrentClientInner {
 
         let status = tokio::sync::watch::Sender::new(AnawtTorrentStatus {
             name: String::new(),
+            save_path: String::new(),
             state: TorrentState::CheckingFiles,
             progress: 0.0,
         });
@@ -401,6 +402,8 @@ impl TorrentClientInner {
                     if s.state == status.state() && s.progress == status.progress() {
                         return false;
                     }
+                    s.name = status.name();
+                    s.save_path = status.save_path();
                     s.state = status.state();
                     s.progress = status.progress();
                     true
