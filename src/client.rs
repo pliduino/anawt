@@ -402,8 +402,8 @@ impl TorrentClientInner {
                     if s.state == status.state() && s.progress == status.progress() {
                         return false;
                     }
-                    s.name = status.name();
-                    s.save_path = status.save_path();
+                    s.name = status.name().to_string();
+                    s.save_path = status.save_path().to_string();
                     s.state = status.state();
                     s.progress = status.progress();
                     true
