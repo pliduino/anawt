@@ -94,7 +94,7 @@ impl TorrentClient {
                     break;
                 }
 
-                if last_update.elapsed() > Duration::from_millis(500) {
+                if last_update.elapsed() > options.tick_rate {
                     client.post_torrent_updates(StatusFlags::all());
                     last_update = Instant::now();
                 }
