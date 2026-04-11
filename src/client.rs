@@ -62,6 +62,7 @@ pub enum ClientMessage {
         InfoHash,
         oneshot::Sender<Option<watch::Receiver<AnawtTorrentStatus>>>,
     ),
+    SubscribeAll(oneshot::Sender<Vec<watch::Receiver<AnawtTorrentStatus>>>),
     Save(PathBuf, oneshot::Sender<Result<(), TorrentError>>),
     Load(PathBuf, oneshot::Sender<Result<(), LoadTorrentError>>),
 }
@@ -120,6 +121,9 @@ impl TorrentClient {
                         }
                         ClientMessage::SubscribeTorrent(info_hash, tx) => {
                             let _ = tx.send(client.subscribe_torrent(info_hash));
+                        }
+                        ClientMessage::SubscribeAll(tx) => {
+                            let _ = tx.send(client.subscribe_all());
                         }
                         ClientMessage::Save(path, tx) => {
                             client.save_requests.push_back(SaveRequest { path, tx });
@@ -231,6 +235,13 @@ impl TorrentClient {
         self.tx
             .send(ClientMessage::SubscribeTorrent(info_hash, tx))
             .unwrap();
+
+        rx.await.unwrap()
+    }
+
+    pub async fn subscribe_all(&self) -> Vec<watch::Receiver<AnawtTorrentStatus>> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(ClientMessage::SubscribeAll(tx)).unwrap();
 
         rx.await.unwrap()
     }
