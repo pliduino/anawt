@@ -293,7 +293,7 @@ impl TorrentClientInner {
 
         info!("Added torrent: {}", info_hash.as_base64());
 
-        let status = tokio::sync::watch::Sender::new(Default::default());
+        let status = tokio::sync::watch::Sender::new(AnawtTorrentStatus::new(info_hash));
 
         self.torrents.replace(TorrentEntry {
             info_hash,

@@ -11,10 +11,11 @@ pub struct AnawtTorrentStatus {
     pub save_path: String,
     pub state: TorrentState,
     pub progress: f64,
+    pub info_hash: InfoHash,
 }
 
-impl Default for AnawtTorrentStatus {
-    fn default() -> Self {
+impl AnawtTorrentStatus {
+    pub fn new(info_hash: InfoHash) -> Self {
         Self {
             name: Default::default(),
             state: TorrentState::CheckingFiles,
@@ -25,6 +26,7 @@ impl Default for AnawtTorrentStatus {
             total_bytes: Default::default(),
             save_path: Default::default(),
             progress: Default::default(),
+            info_hash,
         }
     }
 }
