@@ -3,9 +3,30 @@ use lt_rs::{alerts::TorrentState, info_hash::InfoHash, torrent_handle::TorrentHa
 #[derive(Debug, Clone)]
 pub struct AnawtTorrentStatus {
     pub name: String,
+    pub download_rate: i32,
+    pub upload_rate: i32,
+    pub bytes_uploaded: i64,
+    pub bytes_downloaded: i64,
+    pub total_bytes: i64,
     pub save_path: String,
     pub state: TorrentState,
     pub progress: f64,
+}
+
+impl Default for AnawtTorrentStatus {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            state: TorrentState::CheckingFiles,
+            download_rate: Default::default(),
+            upload_rate: Default::default(),
+            bytes_uploaded: Default::default(),
+            bytes_downloaded: Default::default(),
+            total_bytes: Default::default(),
+            save_path: Default::default(),
+            progress: Default::default(),
+        }
+    }
 }
 
 pub struct TorrentEntry {

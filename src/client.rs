@@ -293,12 +293,7 @@ impl TorrentClientInner {
 
         info!("Added torrent: {}", info_hash.as_base64());
 
-        let status = tokio::sync::watch::Sender::new(AnawtTorrentStatus {
-            name: String::new(),
-            save_path: String::new(),
-            state: TorrentState::CheckingFiles,
-            progress: 0.0,
-        });
+        let status = tokio::sync::watch::Sender::new(Default::default());
 
         self.torrents.replace(TorrentEntry {
             info_hash,
@@ -398,15 +393,16 @@ impl TorrentClientInner {
         for status in status.iter() {
             let info_hash = status.handle().info_hashes();
             if let Some(entry) = self.get_torrent_mut(&info_hash) {
-                entry.status.send_if_modified(|s| {
-                    if s.state == status.state() && s.progress == status.progress() {
-                        return false;
-                    }
+                entry.status.send_modify(|s| {
                     s.name = status.name().to_string();
                     s.save_path = status.save_path().to_string();
                     s.state = status.state();
                     s.progress = status.progress();
-                    true
+                    s.bytes_downloaded = status.all_time_download();
+                    s.bytes_uploaded = status.all_time_upload();
+                    s.total_bytes = status.total();
+                    s.download_rate = status.download_rate();
+                    s.upload_rate = status.upload_rate();
                 });
             }
         }
