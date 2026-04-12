@@ -34,4 +34,5 @@ mod torrent_entry;
 pub use client::TorrentClient;
 pub use lt_rs::alerts::TorrentState;
 pub use lt_rs::info_hash::InfoHash;
+pub use lt_rs::session::RemoveFlags;
 pub use torrent_entry::AnawtTorrentStatus;
